@@ -1,0 +1,14 @@
+{
+  "name": "edclub-slack-bot",
+  "version": "1.0.0",
+  "description": "Post EdClub typing reports to Slack",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "type": "commonjs",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  }
+}
