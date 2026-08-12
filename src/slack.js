@@ -1,4 +1,4 @@
-import { sleep } from "../utils/sleep.js";
+import { sleep } from "./util.js";
 
 const MAX_BLOCKS_PER_MESSAGE = 45;
 
