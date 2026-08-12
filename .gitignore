@@ -1,12 +1,30 @@
+# Dependencies
 node_modules/
+
+# Secrets
 .env
 .env.*
 !.env.example
-.DS_Store
-npm-debug.log*
+
+# Logs
+logs/
 *.log
-.idea/
-.vscode/
-coverage/
+npm-debug.log*
+
+# Build / cache
 dist/
 build/
+.cache/
+tmp/
+temp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+tests/*

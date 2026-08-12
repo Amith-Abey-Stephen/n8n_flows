@@ -1,17 +1,20 @@
-require("dotenv").config();
+import { runReport } from "./report.js";
+import { startScheduler } from "./scheduler.js";
+import { logError } from "./utils/logger.js";
 
-const { fetchClassReport } = require("./edclub");
-const { buildSlackMessage } = require("./report");
-const { postToSlack } = require("./slack");
+const args = new Set(process.argv.slice(2));
+const runNow = args.has("--now");
+const dryRun = args.has("--dry-run");
 
-async function main() {
-  const data = await fetchClassReport();
-  const message = buildSlackMessage(data);
-  await postToSlack(message);
-  console.log("Report posted to Slack");
+if (runNow || dryRun) {
+  // `npm run report` — generate and deliver one report immediately.
+  runReport({ dryRun })
+    .then(() => process.exit(0))
+    .catch((error) => {
+      logError(`Report failed: ${error.message}`);
+      process.exit(1);
+    });
+} else {
+  // `npm start` — keep the process alive and post daily on schedule.
+  startScheduler(runReport);
 }
-
-main().catch((err) => {
-  console.error(err.message || err);
-  process.exit(1);
-});
