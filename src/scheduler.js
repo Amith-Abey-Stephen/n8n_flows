@@ -2,11 +2,6 @@ import cron from "node-cron";
 import { config } from "./config.js";
 import { log, logError } from "./utils/logger.js";
 
-/**
- * Run the report every day at REPORT_HOUR:REPORT_MINUTE (default 22:00) in
- * the configured timezone (default Asia/Kolkata). node-cron evaluates the
- * expression in that timezone, so the host machine's timezone is irrelevant.
- */
 export function startScheduler(runReport) {
   const expression = `${config.report.minute} ${config.report.hour} * * *`;
 

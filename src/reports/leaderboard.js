@@ -8,15 +8,6 @@ import {
   packLines,
 } from "./format.js";
 
-/**
- * RANKING RULE — the edclub API exposes no explicit rank or ordering field on
- * its scoreboard data (verified: student-progress records carry score/stars
- * but no rank), so per the spec we sort descending by:
- *   1. score
- *   2. stars (tie-break)
- *   3. name ascending (stable, deterministic output)
- * Missing values count as 0 so partial data never crashes the sort.
- */
 export function rankStudents(students) {
   return students
     .filter((student) => !student.failed)
@@ -28,11 +19,6 @@ export function rankStudents(students) {
     );
 }
 
-/**
- * Section 2 — scoreboard. Progress uses `progress_percent` straight from the
- * student-progress endpoint (falling back to current-stats coverage upstream
- * when absent); duration uses the authoritative `secs` field.
- */
 export function buildLeaderboardBlocks(students, now, timeZone) {
   const ranked = rankStudents(students);
   const failed = students.filter((student) => student.failed);

@@ -1,5 +1,3 @@
-/** Shared Slack formatting helpers (pure — no config/env dependencies). */
-
 export function escapeMrkdwn(text) {
   return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -27,9 +25,8 @@ export function statusEmoji(status) {
   return "🔴";
 }
 
-const MAX_SECTION_CHARS = 2900; // Slack caps section text at 3000 chars.
+const MAX_SECTION_CHARS = 2900;
 
-/** Pack lines into section blocks, respecting Slack's per-block text limit. */
 export function packLines(lines, { perSection = 8, maxChars = MAX_SECTION_CHARS } = {}) {
   const blocks = [];
   let current = [];
@@ -51,7 +48,6 @@ function sectionBlock(text) {
   return { type: "section", text: { type: "mrkdwn", text } };
 }
 
-/** Plain-text rendering of Block Kit blocks for the console preview. */
 export function blocksToText(blocks) {
   const out = [];
   for (const block of blocks) {

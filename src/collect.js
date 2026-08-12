@@ -4,17 +4,14 @@ import { getStudentProgress, aggregateProgress } from "./edclub/progress.js";
 import { withRetry } from "./utils/retry.js";
 import { log } from "./utils/logger.js";
 
-/**
- * Fetch and normalize all report data.
- *
- * Per-student requests run through a small worker pool (default concurrency
- * 3) with retry/backoff, and one student's failure never aborts the run —
- * the student is flagged `failed: true`, collected in `failedIds`, and the
- * report continues. Each endpoint is called at most once per student per run
- * (results live in the returned normalized objects — no duplicate fetches).
- *
- * The `fetch*` dependencies are injectable for tests.
- */
+async function settled(fn) {
+  try {
+    return { ok: true, value: await fn() };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
 export async function collectStudentData(
   client,
   {
@@ -46,38 +43,40 @@ export async function collectStudentData(
         score: null,
         durationSeconds: null,
         progressPercent: null,
-        accuracy: null,
-        wpm: null,
-        practiceTodaySeconds: null,
         failed: false,
       };
 
-      try {
-        const [stats, progressRecords] = await Promise.all([
-          withRetry(() => fetchStats(client, student.id), { label: `stats(${student.id})` }),
+      const [statsResult, progressResult] = await Promise.all([
+        settled(() =>
+          withRetry(() => fetchStats(client, student.id), { label: `stats(${student.id})` })
+        ),
+        settled(() =>
           withRetry(() => fetchProgress(client, student.id), {
             label: `progress(${student.id})`,
-          }),
-        ]);
+          })
+        ),
+      ]);
 
-        Object.assign(normalized, aggregateProgress(progressRecords));
+      if (progressResult.ok) {
+        Object.assign(normalized, aggregateProgress(progressResult.value));
+      }
 
-        // current-stats fallbacks for fields missing from progress records.
+      if (statsResult.ok) {
+        const stats = statsResult.value;
         if (!normalized.lastActivity && stats?.last_active_date) {
           normalized.lastActivity = stats.last_active_date;
         }
-        if (normalized.accuracy === null) {
-          normalized.accuracy = stats?.real_accuracy_current ?? null;
-        }
-        if (normalized.wpm === null) normalized.wpm = stats?.speed_current ?? null;
         if (normalized.progressPercent === null) {
           normalized.progressPercent = stats?.coverage_current ?? null;
         }
-        normalized.practiceTodaySeconds = stats?.practice_today ?? null;
-      } catch (error) {
+      }
+
+      if (!progressResult.ok) {
         normalized.failed = true;
         failedIds.push(student.id);
-        log(`⚠️ Data unavailable for student ${student.id} (${student.name}): ${error.message}`);
+        log(
+          `⚠️ Data unavailable for student ${student.id} (${student.name}): ${progressResult.error.message}`
+        );
       }
 
       students[index] = normalized;

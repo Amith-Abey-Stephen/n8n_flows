@@ -8,11 +8,6 @@ import { postReport } from "./slack/client.js";
 import { formatLongDate } from "./utils/dates.js";
 import { log } from "./utils/logger.js";
 
-/**
- * One full report run: fetch → normalize → build both sections → deliver.
- * Always prints the report to the console; posts to Slack unless dry-run or
- * the webhook is not configured.
- */
 export async function runReport({ dryRun = false } = {}) {
   log("Starting report");
   assertEdclubCredentials();
@@ -36,6 +31,7 @@ export async function runReport({ dryRun = false } = {}) {
 
   const canPost =
     (config.slack.botToken && config.slack.channel) || config.slack.webhookUrl;
+
   if (dryRun) {
     log("Dry run — skipping Slack post");
   } else if (!canPost) {

@@ -7,7 +7,6 @@ const runNow = args.has("--now");
 const dryRun = args.has("--dry-run");
 
 if (runNow || dryRun) {
-  // `npm run report` — generate and deliver one report immediately.
   runReport({ dryRun })
     .then(() => process.exit(0))
     .catch((error) => {
@@ -15,6 +14,5 @@ if (runNow || dryRun) {
       process.exit(1);
     });
 } else {
-  // `npm start` — keep the process alive and post daily on schedule.
   startScheduler(runReport);
 }

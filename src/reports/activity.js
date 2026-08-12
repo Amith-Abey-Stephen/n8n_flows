@@ -1,15 +1,6 @@
 import { describeLastActive, formatLongDate } from "../utils/dates.js";
 import { escapeMrkdwn, packLines, statusEmoji } from "./format.js";
 
-/**
- * Section 1 — student activity. Every active student appears, sorted most
- * recently active first (never-practiced students last). Status colors:
- * 🟢 practiced today (IST) · 🟡 yesterday · 🔴 older or never.
- *
- * This section only needs the roster data (name + last_activity_date), so a
- * student whose per-student endpoints failed still shows their last-active
- * time, plus a data-unavailable marker for the scoreboard fields.
- */
 export function buildActivityBlocks(students, now, timeZone) {
   const sorted = [...students].sort((a, b) => {
     const ta = a.lastActivity ? Date.parse(a.lastActivity) : Number.NEGATIVE_INFINITY;

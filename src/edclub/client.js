@@ -9,9 +9,6 @@ export class EdclubApiError extends Error {
   }
 }
 
-// Keys the refresh response might use for the new access token. The refresh
-// contract was inferred from observed browser behavior (POST with an `rt`
-// cookie); the response shape is parsed defensively.
 const ACCESS_TOKEN_KEYS = ["at", "access_token", "token", "access", "auth_token"];
 
 function isCloudflareChallenge(response, text) {
@@ -29,18 +26,6 @@ function pathOf(url) {
   }
 }
 
-/**
- * Minimal authenticated HTTP client for the edclub DRF API.
- *
- * Auth quirks verified against the live API:
- *  - The Authorization header carries the RAW token — no "Bearer "/"Token "
- *    prefix (prefixed values are rejected with "Bad Token").
- *  - Never set a browser-like User-Agent: Cloudflare fingerprints the TLS
- *    stack, and a browser UA on a non-browser client triggers its JS
- *    challenge. Node's default fetch UA passes.
- *  - Access tokens are short-lived; on 401 the client refreshes once via
- *    POST /auth/refresh_tokens/ (rt cookie) and replays the request.
- */
 export class EdclubClient {
   constructor({ apiUrl, authUrl, accessToken, refreshToken }) {
     this.apiUrl = apiUrl;
@@ -115,7 +100,6 @@ export class EdclubClient {
     }
   }
 
-  /** Single-flight token refresh — concurrent 401s share one refresh call. */
   refreshTokens() {
     if (!this.refreshPromise) {
       this.refreshPromise = this.#doRefresh().finally(() => {
@@ -157,8 +141,9 @@ export class EdclubClient {
     try {
       data = JSON.parse(text);
     } catch {
-      // fall through to the "no recognizable token" error below
+      // ignore — handled below
     }
+
     const newAccessToken = ACCESS_TOKEN_KEYS.map((key) => data?.[key]).find(
       (value) => typeof value === "string" && value.length > 0
     );
@@ -170,7 +155,6 @@ export class EdclubClient {
     }
     this.accessToken = newAccessToken;
 
-    // The server may rotate the rt cookie; keep the newest one in memory.
     const cookies =
       typeof response.headers.getSetCookie === "function" ? response.headers.getSetCookie() : [];
     for (const cookie of cookies) {

@@ -1,8 +1,10 @@
 import "dotenv/config";
 
 function normalizeBaseUrl(raw) {
-  const url = (raw || "https://finalapps.edclub.com").replace(/\/+$/, "");
-  // Tolerate a base URL that already includes the DRF API prefix.
+  const url = (raw || "").trim().replace(/\/+$/, "");
+  if (!url) {
+    throw new Error("Missing EDCLUB_BASE_URL in .env");
+  }
   return url.replace(/\/drf\/[\d.]+$/, "");
 }
 
@@ -18,14 +20,11 @@ function intFromEnv(name, fallback, min, max) {
 
 function readWebhookUrl() {
   const raw = (process.env.SLACK_WEBHOOK_URL || "").trim();
-  // Placeholder values (e.g. "PASTE_YOUR_WEBHOOK_HERE") are treated as unset.
   return raw.startsWith("https://hooks.slack.com/") ? raw : null;
 }
 
 function readBotToken() {
   const raw = (process.env.SLACK_BOT_TOKEN || "").trim();
-  // Slack tokens start with "xox" (bot tokens: xoxb-); anything else is a
-  // placeholder.
   return raw.startsWith("xox") ? raw : null;
 }
 
@@ -55,7 +54,7 @@ export const config = {
 export function assertEdclubCredentials() {
   if (!config.edclub.accessToken && !config.edclub.refreshToken) {
     throw new Error(
-      "Missing edclub credentials. Set EDCLUB_AUTH_TOKEN (and ideally EDCLUB_REFRESH_TOKEN) in .env — see README \"Authentication setup\"."
+      "Missing edclub credentials. Set EDCLUB_AUTH_TOKEN (and ideally EDCLUB_REFRESH_TOKEN) in .env."
     );
   }
 }

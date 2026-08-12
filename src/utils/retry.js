@@ -1,14 +1,6 @@
 import { log } from "./logger.js";
+import { sleep } from "./sleep.js";
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * Retry `fn` with exponential backoff and jitter.
- *
- * Only errors flagged `retryable: true` are retried (the edclub client flags
- * 429, 5xx, and network errors; 401/403 are never retryable — retrying those
- * would just hammer the API with a dead token).
- */
 export async function withRetry(
   fn,
   { retries = 3, baseDelayMs = 500, maxDelayMs = 8000, label = "request" } = {}

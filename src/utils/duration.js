@@ -1,15 +1,3 @@
-/**
- * Format a duration in seconds as a compact human-readable string.
- *
- *   0    → "0m"
- *   1432 → "23m 52s"
- *   3600 → "1h"
- *   3661 → "1h 1m 1s"
- *
- * The edclub `student-progress` endpoint returns both `secs` and `msecs`
- * (msecs = secs * 1000); `secs` is treated as authoritative upstream and this
- * function always receives plain seconds.
- */
 export function formatDuration(totalSeconds) {
   const numeric = Number(totalSeconds);
   if (totalSeconds === null || totalSeconds === undefined || Number.isNaN(numeric)) {
