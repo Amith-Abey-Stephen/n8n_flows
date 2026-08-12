@@ -61,7 +61,7 @@ under `{EDCLUB_BASE_URL}/drf/1.1.1`.
 | `/students/{id}/typing_student_current_stats/` | `POST`, body `{}` | GET returns **405** (`Allow: POST, OPTIONS`). The body must be an **empty JSON object** — any non-empty body causes a 500. |
 | `/students/{id}/student-progress/` | `GET` | Despite the 405 seen in early exploration (that came from the POST-only stats endpoints above), this is a plain GET. Paginated; one record per enrolled course with `score`, `stars`, `secs`/`msecs`, `progress_percent`, `avg_accuracy` (string `"95%"`), `avg_wpm` (string `"22"`). |
 | `/students/{id}/typing_student_overview/` | `POST`, body `{"period": …}` | Accepted but always returned `[]` in probing — see "API limitations". |
-| `/auth/refresh_tokens/` | `POST` | JSON content type, refresh token sent as the `rt` cookie. Invalid/missing token → `400 {}`. |
+| `/auth/refresh_tokens/` | `POST` | Refresh token sent as the `rt` cookie **and the JSON body must name the tenant**: `{"domain": "finalapps"}` (first hostname label) — without it the server answers `400` with an empty array. Response: an **array of account objects**, the access token in each entry's `token` field (pick the `is_student: false` entry). Every refresh also rotates the `rt` via `Set-Cookie` (leniently — old values keep working for a while). |
 
 Two hard-won client rules, both enforced in `src/edclub/client.js`:
 
@@ -110,10 +110,13 @@ The service reuses your authenticated teacher browser session's tokens —
 4. DevTools → **Application** → **Cookies** → your edclub host, copy the
    `rt` cookie value into `EDCLUB_REFRESH_TOKEN`.
 
-Access tokens are short-lived (they can expire within hours). With
-`EDCLUB_REFRESH_TOKEN` set, the client automatically calls
-`POST /auth/refresh_tokens/` on the first 401 and replays the request; without
-it, you'll need to re-copy a fresh `EDCLUB_AUTH_TOKEN` whenever it expires.
+Access tokens are short-lived (they expire within hours), so
+`EDCLUB_REFRESH_TOKEN` is effectively required for unattended operation. With
+it set, the client automatically calls `POST /auth/refresh_tokens/` on the
+first 401 and replays the request. The server rotates the `rt` on every
+refresh; the service adopts the newest value in memory and writes both tokens
+back to `.env` (best-effort — skipped on hosts without a `.env` file, which
+is fine because old `rt` values remain usable for a while).
 
 > **If the refresh token itself expires** (400 from the refresh endpoint),
 > sign in again and re-copy both values. This is a deliberate design choice:
@@ -245,10 +248,11 @@ platform only offers cron-style execution, schedule `npm run report` daily at
   daily report doesn't need it (students + current-stats + student-progress
   cover every reported field). `src/edclub/overview.js` explains how to
   capture the exact browser payload if you ever need this data.
-- **Token refresh response shape** could not be fully verified without
-  consuming a live refresh token; the client parses it defensively (several
-  candidate key names + rotated `rt` cookie) and fails with an actionable
-  message if the shape is unrecognized.
+- **Token refresh** is fully verified live (2026-08-12): `rt` cookie +
+  `{"domain": …}` body → array of accounts with `token` fields, rotated `rt`
+  in `Set-Cookie`. Rotation is lenient (old `rt`s keep working for a while),
+  so multiple consumers (browser + service + n8n) can share a session without
+  locking each other out.
 - **Cloudflare** fronts the API and will challenge clients that look
   "assembled" (browser UA on non-browser TLS). The client deliberately sends
   minimal headers.
