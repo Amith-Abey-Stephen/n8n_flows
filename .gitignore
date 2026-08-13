@@ -1,0 +1,8 @@
+# Never commit credentials. If you export the workflow from n8n after pasting
+# the real refreshTokenSeed into the Config node, scrub it before committing —
+# or export to a *.local.json name, which stays untracked:
+.env
+.env.*
+*.local.json
+*.har
+.DS_Store
