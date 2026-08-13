@@ -3,6 +3,7 @@
 # or export to a *.local.json name, which stays untracked:
 .env
 .env.*
+!.env.example
 *.local.json
 *.har
 .DS_Store
