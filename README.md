@@ -9,7 +9,7 @@ bot. Each folder is self-contained: the workflow JSON, its own README, and a
 | Folder | What it does |
 |---|---|
 | [`typingclub-slack/`](typingclub-slack/) | Daily edclub / TypingClub activity + scoreboard report, posted to Slack at 22:00 IST. |
-| [`birthday-bot/`](birthday-bot/) | _Placeholder — not built yet._ |
+| [`birthday-bot/`](birthday-bot/) | Daily Google Sheet birthday check → Slack bot posts `🎉🎂 Happy Birthday <name>` at 00:00 IST. |
 
 ## Conventions
 

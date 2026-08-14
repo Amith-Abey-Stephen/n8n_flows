@@ -1,0 +1,171 @@
+{
+  "name": "Birthday Slack wishes",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 * * *"
+            }
+          ]
+        }
+      },
+      "id": "bday-0001-4000-8000-000000000001",
+      "name": "Every day 00:00 IST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cfg-1",
+              "name": "sheetId",
+              "value": "={{ $env.BIRTHDAY_SHEET_ID }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-2",
+              "name": "sheetName",
+              "value": "={{ $env.BIRTHDAY_SHEET_NAME }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-3",
+              "name": "slackChannel",
+              "value": "={{ $env.SLACK_CHANNEL }}",
+              "type": "string"
+            },
+            {
+              "id": "cfg-4",
+              "name": "timezone",
+              "value": "Asia/Kolkata",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bday-0002-4000-8000-000000000002",
+      "name": "Config (edit me)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Config (edit me)').first().json.sheetId }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $('Config (edit me)').first().json.sheetName }}"
+        },
+        "options": {}
+      },
+      "id": "bday-0003-4000-8000-000000000003",
+      "name": "Fetch spreadsheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [440, 0],
+      "notes": "Connect a Google Sheets OAuth credential in n8n. Sheet columns: Name, DOB (DD/MM/YYYY).",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Config (edit me)').first().json;\nconst TZ = cfg.timezone || 'Asia/Kolkata';\nconst todayMD = new Intl.DateTimeFormat('en-CA', {\n  timeZone: TZ,\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit',\n})\n  .format(new Date())\n  .slice(5);\n\nfunction toMD(v) {\n  if (v == null || v === '') return null;\n  if (typeof v === 'number') {\n    const d = new Date(Date.UTC(1899, 11, 30) + v * 864e5);\n    return `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;\n  }\n  const s = String(v).trim();\n  let m = s.match(/^(\\d{4})-(\\d{2})-(\\d{2})/);\n  if (m) return `${m[2]}-${m[3]}`;\n  m = s.match(/^(\\d{1,2})[\\/\\-.](\\d{1,2})[\\/\\-.](\\d{2,4})$/);\n  if (m) {\n    const day = +m[1];\n    const month = +m[2];\n    return `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;\n  }\n  const d = new Date(s);\n  if (Number.isNaN(d.getTime())) return null;\n  return `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;\n}\n\nconst out = [];\nfor (const item of $input.all()) {\n  const row = item.json;\n  const name = row.Name || row.name;\n  const bday = row.DOB || row.Dob || row.dob || row.Birthday || row.birthday;\n  const md = toMD(bday);\n  if (!name || !md || md !== todayMD) continue;\n  out.push({ json: { text: `🎉🎂 Happy Birthday ${String(name).trim()}` } });\n}\nreturn out;\n"
+      },
+      "id": "bday-0004-4000-8000-000000000004",
+      "name": "Today's birthdays",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: $('Config (edit me)').first().json.slackChannel, text: $json.text, unfurl_links: false }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1100
+            }
+          }
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SLACK_BOT_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "id": "bday-0005-4000-8000-000000000005",
+      "name": "Post to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 0],
+      "notes": "Uses Slack Bot token (xoxb-…) from SLACK_BOT_TOKEN. Invite the bot to the channel.",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "for (const item of $input.all()) {\n  const body = item.json;\n  if (body && body.ok === false) {\n    const e = body.error;\n    const hint =\n      e === 'not_authed' || e === 'invalid_auth' || e === 'token_revoked' || e === 'token_expired'\n        ? ' — check SLACK_BOT_TOKEN (Bot User OAuth Token, xoxb-…).'\n        : e === 'channel_not_found'\n          ? ' — SLACK_CHANNEL must be a channel ID (C…) and invite the bot (/invite @YourBot).'\n          : e === 'not_in_channel'\n            ? ' — invite the bot to the channel first.'\n            : e === 'no_permission' || e === 'missing_scope'\n              ? ' — bot needs chat:write (and invite it to the channel).'\n              : '';\n    throw new Error('Slack API error: ' + e + hint);\n  }\n}\nreturn $input.all();\n"
+      },
+      "id": "bday-0006-4000-8000-000000000006",
+      "name": "Verify Slack response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "content": "### Setup\n1. Google Sheet columns: **Name**, **DOB** (`DD/MM/YYYY`).\n2. Connect Google Sheets OAuth on **Fetch spreadsheet**.\n3. Slack app → Bot scope `chat:write` → install → `SLACK_BOT_TOKEN` (`xoxb-…`).\n4. `/invite @YourBot` into the channel.\n5. Host env: `BIRTHDAY_SHEET_ID`, `BIRTHDAY_SHEET_NAME`, `SLACK_CHANNEL`, `SLACK_BOT_TOKEN` — restart n8n.\n6. Import → Execute once → Active.\n\nRuns daily at **00:00 IST** (midnight). No birthdays → no posts.",
+        "height": 340,
+        "width": 420
+      },
+      "id": "bday-0007-4000-8000-000000000007",
+      "name": "Setup notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [440, 220]
+    }
+  ],
+  "connections": {
+    "Every day 00:00 IST": {
+      "main": [[{ "node": "Config (edit me)", "type": "main", "index": 0 }]]
+    },
+    "Config (edit me)": {
+      "main": [[{ "node": "Fetch spreadsheet", "type": "main", "index": 0 }]]
+    },
+    "Fetch spreadsheet": {
+      "main": [[{ "node": "Today's birthdays", "type": "main", "index": 0 }]]
+    },
+    "Today's birthdays": {
+      "main": [[{ "node": "Post to Slack", "type": "main", "index": 0 }]]
+    },
+    "Post to Slack": {
+      "main": [[{ "node": "Verify Slack response", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "timezone": "Asia/Kolkata",
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
