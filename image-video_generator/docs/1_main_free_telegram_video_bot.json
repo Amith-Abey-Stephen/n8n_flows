@@ -1,0 +1,790 @@
+{
+  "name": "Free Image-to-Video Telegram Bot (Main)",
+  "nodes": [
+    {
+      "id": "bd84b34e-6e44-49c0-8659-73faf6dc2499",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ME",
+          "name": "Telegram Bot"
+        }
+      },
+      "webhookId": "d3bd7e17-f819-4f13-9910-37eb847ccb1c"
+    },
+    {
+      "id": "ecd232db-9b74-4d34-9681-9080b26f7eba",
+      "name": "Settings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// ================= EDIT YOUR SETTINGS HERE =================\n// Negative prompt used by the Wan 2.2 Space (tells the model what to avoid)\nconst WAN_NEGATIVE = '色调艳丽, 过曝, 静态, 细节模糊不清, 字幕, 风格, 作品, 画作, 画面, 静止, 整体发灰, 最差质量, 低质量, JPEG压缩残留, 丑陋的, 残缺的, 多余的手指, 画得不好的手部, 画得不好的脸部, 畸形的, 毁容的, 形态畸形的肢体, 手指融合, 静止不动的画面, 杂乱的背景, 三条腿, 背景人很多, 倒着走';\n\nconst WAN_FAST = {\n  name: 'Wan 2.2 14B Fast (free HF Space)',\n  space_url: 'https://zerogpu-aoti-wan2-2-fp8da-aoti-faster.hf.space',\n  api_name: 'generate_video',\n  // Must match the order of the Space's inputs (see \"Use via API\" at the bottom of the Space page).\n  // __IMAGE__ and __PROMPT__ are filled in automatically.\n  // [image, prompt, steps, negative_prompt, duration_seconds, guidance, guidance_2, seed, randomize_seed]\n  data: ['__IMAGE__', '__PROMPT__', 4, WAN_NEGATIVE, 3.5, 1, 1, 42, true],\n};\n\nconst settings = {\n  daily_limit_per_user: 2,   // videos per Telegram user per day (0 = unlimited)\n  admin_user_ids: [],        // put YOUR Telegram user ID here, e.g. [123456789] = no limit for you\n  timezone: 'Asia/Kolkata',  // when the daily count resets\n  providers: [\n    WAN_FAST,                                        // primary\n    { ...WAN_FAST, name: 'Wan 2.2 14B Fast (retry)' } // fallback: retries once if the Space was busy.\n                                                      // Swap in another Space here if you like.\n  ],\n};\n// ===========================================================\nreturn [{ json: { ...$json, settings } }];"
+      }
+    },
+    {
+      "id": "b833d83d-a4ce-461f-bd19-011659a961fb",
+      "name": "Parse Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const msg = $json.message ?? {};\nconst MAX_BYTES = 20 * 1024 * 1024; // Telegram bots can only download files up to 20 MB\n\nconst DEFAULT_PROMPT = 'make this image come alive, subtle realistic movement, slow smooth camera motion, natural lighting, cinematic';\nconst PRESETS = {\n  '/portrait':  'Cinematic slow push-in, natural ambient movement, soft directional lighting shift, gentle micro-movement, shallow depth of field',\n  '/landscape': 'Subtle camera pan from left to right, gentle breeze moving background elements, volumetric sunlight, realistic physics',\n  '/product':   'Slow smooth orbit around the subject, soft studio key-light reflection, subtle focus rack, steady motion',\n};\n\nlet fileId = null, mimeType = 'image/jpeg', rejectReason = null;\n\nif (Array.isArray(msg.photo) && msg.photo.length > 0) {\n  fileId = msg.photo[msg.photo.length - 1].file_id; // highest resolution\n} else if (msg.document?.mime_type?.startsWith('image/')) {\n  if ((msg.document.file_size ?? 0) > MAX_BYTES) {\n    rejectReason = 'That image is over 20 MB, the most a Telegram bot can download. Please send a smaller file.';\n  } else {\n    fileId = msg.document.file_id;\n    mimeType = msg.document.mime_type;\n  }\n} else {\n  rejectReason = \"Send me a photo and I'll turn it into a short video 🎬\\n\\n\" +\n    'Add a caption to describe the motion, or start it with /portrait, /landscape or /product.';\n}\n\n// Prompt for the MODEL: plain text, never HTML-escaped\nconst raw = (msg.caption ?? '').replace(/[\\u0000-\\u001F\\u007F]/g, ' ').trim().substring(0, 250);\nconst [first, ...rest] = raw.split(/\\s+/);\nconst preset = PRESETS[(first ?? '').toLowerCase()];\nlet prompt;\nif (preset) {\n  const extra = rest.join(' ').trim();\n  prompt = extra ? `${preset}. ${extra}` : preset;\n} else {\n  prompt = raw || DEFAULT_PROMPT;\n}\n\n// Prompt for DISPLAY in Telegram (HTML mode): escaped\nconst escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n\nreturn [{ json: {\n  has_image: Boolean(fileId),\n  reject_reason: rejectReason,\n  file_id: fileId,\n  mime_type: mimeType,\n  prompt,\n  prompt_html: escapeHtml(prompt.substring(0, 300)),\n  chat_id: msg.chat?.id,\n  user_id: msg.from?.id,\n  message_id: msg.message_id,\n}}];"
+      }
+    },
+    {
+      "id": "bcb250cb-0c20-4638-81c0-132c2e300c16",
+      "name": "Has Image?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2f618c55-0110-4976-9cb4-ae12d75c3dd8",
+              "leftValue": "={{ $json.has_image }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "624b7d1b-d7f9-4bff-bc82-cfabc2e07086",
+      "name": "Reject Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        800,
+        520
+      ],
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.reject_reason }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ME",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "5fe581fc-c56b-421d-9058-4821940f29d4",
+      "name": "Check Daily Limit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Per-user daily limit, stored in workflow static data.\n// Note: static data only persists in PRODUCTION runs (workflow Active), not manual test runs.\nconst p = $input.first().json;\nconst s = $('Settings').first().json.settings;\nconst store = $getWorkflowStaticData('global');\n\nconst today = new Date().toLocaleDateString('en-CA', { timeZone: s.timezone });\nif (store.usage_day !== today) { store.usage_day = today; store.usage = {}; }\n\nconst uid = String(p.user_id);\nconst used = store.usage[uid] ?? 0;\nconst isAdmin = (s.admin_user_ids ?? []).map(String).includes(uid);\nconst allowed = isAdmin || !s.daily_limit_per_user || used < s.daily_limit_per_user;\nif (allowed) store.usage[uid] = used + 1;\n\nreturn [{ json: {\n  ...p,\n  allowed,\n  limit_message: allowed ? null :\n    `You've used your ${s.daily_limit_per_user} free videos for today 🌙 Please come back tomorrow!`,\n}}];"
+      }
+    },
+    {
+      "id": "a9c8c73a-001b-4cc9-911b-75de6b1b59ad",
+      "name": "Allowed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1000,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "02afad29-c71f-48fb-937d-f057a0481ff7",
+              "leftValue": "={{ $json.allowed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "e22c5f8e-d669-488f-a520-f366f12d888a",
+      "name": "Limit Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        520
+      ],
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.limit_message }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "reply_to_message_id": "={{ $json.message_id }}"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ME",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "93813135-4dcb-4c29-93b1-77d7f9b3d9ab",
+      "name": "Send Ack",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        300
+      ],
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "⏳ Working on it... generating your video. Usually 1–3 minutes (longer if the free GPU is busy).",
+        "additionalFields": {
+          "appendAttribution": false,
+          "reply_to_message_id": "={{ $json.message_id }}"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ME",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "e7607cc3-dc70-41c1-85c0-7c94f933326c",
+      "name": "Get Telegram File",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1400,
+        300
+      ],
+      "parameters": {
+        "resource": "file",
+        "fileId": "={{ $('Check Daily Limit').first().json.file_id }}",
+        "download": true,
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ME",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "id": "b7427aa8-4758-4714-8d0e-fbe15e35eb4e",
+      "name": "Build Job",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Image -> base64 so it can be handed to the sub-workflow. Your bot token never leaves n8n.\nconst bin = $input.first().binary?.data;\nif (!bin) throw new Error('Could not download the image from Telegram');\nconst buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst parsed = $('Check Daily Limit').first().json;\nconst settings = $('Settings').first().json.settings;\nconst ack = $('Send Ack').first().json;\n\nreturn [{ json: {\n  image_base64: buffer.toString('base64'),\n  mime_type: bin.mimeType?.startsWith('image/') ? bin.mimeType : parsed.mime_type,\n  prompt: parsed.prompt,\n  provider: settings.providers[0],\n  chat_id: parsed.chat_id,\n  user_id: parsed.user_id,\n  ack_message_id: ack.result?.message_id ?? ack.message_id,\n}}];"
+      }
+    },
+    {
+      "id": "0d5a9044-ffb0-43e4-bb1b-4f5c78d654ba",
+      "name": "Execute Primary",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1800,
+        300
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_HF_SUBWORKFLOW_ID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "fa23ba6d-5d1d-4ef0-967a-f0e56e834710",
+      "name": "Route Primary Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        520
+      ],
+      "parameters": {
+        "jsCode": "// Primary failed. Quota errors skip the fallback: every HF Space shares the same daily GPU quota.\nconst job = $('Build Job').first().json;\nconst s = $('Settings').first().json.settings;\nconst e = $json.error;\nconst msg = e == null ? 'Unknown error' : typeof e === 'string' ? e : (e.message ?? JSON.stringify(e));\nconst fallback = s.providers[1] ?? null;\nconst isQuota = /quota/i.test(msg);\n\nreturn [{ json: { ...job, provider: fallback, primary_error: msg, go_fallback: !isQuota && Boolean(fallback) } }];"
+      }
+    },
+    {
+      "id": "79c295e3-f150-4d33-babf-1969ffa8477c",
+      "name": "Try Fallback?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2200,
+        520
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "eb027ac0-bc0e-43a6-8376-5ad7cc84cbed",
+              "leftValue": "={{ $json.go_fallback }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "61711ad7-385d-4fc7-a99d-505a304e9e03",
+      "name": "Wait Before Retry",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2400,
+        440
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 20,
+        "unit": "seconds"
+      },
+      "webhookId": "3516860c-5ad5-4bce-8a9c-9ec3c1512fa4"
+    },
+    {
+      "id": "b48b5235-2892-46ad-bc0e-62d1e2e109e1",
+      "name": "Execute Fallback",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2600,
+        440
+      ],
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_HF_SUBWORKFLOW_ID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "4175e065-0f3e-4187-9668-61b1fdd7cb37",
+      "name": "Normalize Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Lock metadata BEFORE the binary download replaces $json.\nconst r = $input.first().json;\nif (!r.video_url) throw new Error('Sub-workflow finished without a video_url');\nconst job = $('Build Job').first().json;\nreturn [{ json: {\n  video_url: r.video_url,\n  provider: r.provider ?? 'Unknown',\n  job_id: r.job_id ?? null,\n  chat_id: job.chat_id,\n  ack_message_id: job.ack_message_id,\n  prompt_html: $('Check Daily Limit').first().json.prompt_html,\n}}];"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "6154115e-2262-434d-8f94-90b5e3380671",
+      "name": "Download Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3000,
+        300
+      ],
+      "parameters": {
+        "url": "={{ $json.video_url }}",
+        "options": {
+          "timeout": 120000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "video"
+            }
+          }
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "4cfacdd8-534e-4330-a506-03a942e60ab3",
+      "name": "Send Video",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3200,
+        300
+      ],
+      "parameters": {
+        "operation": "sendVideo",
+        "chatId": "={{ $('Normalize Output').first().json.chat_id }}",
+        "binaryData": true,
+        "binaryPropertyName": "video",
+        "additionalFields": {
+          "caption": "=🎬 {{ $('Normalize Output').first().json.prompt_html }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ME",
+          "name": "Telegram Bot"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "cb6f4243-426a-48e1-92d1-3372e1fd2614",
+      "name": "Edit Ack: Success",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3400,
+        300
+      ],
+      "parameters": {
+        "operation": "editMessageText",
+        "messageType": "message",
+        "chatId": "={{ $('Normalize Output').first().json.chat_id }}",
+        "messageId": "={{ $('Normalize Output').first().json.ack_message_id }}",
+        "text": "=<b>✅ Video ready!</b>\n\n<b>Engine:</b> {{ $('Normalize Output').first().json.provider }}\n<b>Prompt:</b> {{ $('Normalize Output').first().json.prompt_html }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ME",
+          "name": "Telegram Bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "b5a5cb54-e09e-4177-a48d-1c29eacb62f0",
+      "name": "Build Delivery Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3400,
+        520
+      ],
+      "parameters": {
+        "jsCode": "const n = $('Normalize Output').first().json;\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;');\nconst e = $json.error;\nconst reason = e == null ? 'Upload to Telegram failed or timed out'\n  : typeof e === 'string' ? e : (e.message ?? JSON.stringify(e));\nconst text =\n  `<b>⚠️ Video rendered, but sending it to Telegram failed.</b>\\n\\n` +\n  `<b>Reason:</b> ${esc(reason).slice(0, 300)}\\n\\n` +\n  `<a href=\"${esc(n.video_url)}\">Download the video here</a> (temporary link, save it soon).`;\nreturn [{ json: { chat_id: n.chat_id, ack_message_id: n.ack_message_id, text } }];"
+      }
+    },
+    {
+      "id": "cdf1d85c-7f75-4a3a-87b2-a7d9a7c9c77a",
+      "name": "Delivery Error Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3600,
+        520
+      ],
+      "parameters": {
+        "operation": "editMessageText",
+        "messageType": "message",
+        "chatId": "={{ $json.chat_id }}",
+        "messageId": "={{ $json.ack_message_id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ME",
+          "name": "Telegram Bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "147625ae-77ae-43db-bcbf-26f6f07b529f",
+      "name": "Build Generation Failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        720
+      ],
+      "parameters": {
+        "jsCode": "const job = $('Build Job').first().json;\nconst esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst toText = (e) => e == null ? null : typeof e === 'string' ? e : (e.message ?? JSON.stringify(e));\n\nconst primary = $('Route Primary Error').isExecuted ? $('Route Primary Error').first().json.primary_error : null;\nconst last = toText($json.error);\nconst all = [primary, last].filter(Boolean).join(' | ') || 'Unknown error';\n\n// Give the user their daily credit back, since nothing was delivered.\nconst store = $getWorkflowStaticData('global');\nconst uid = String(job.user_id);\nif (store.usage && store.usage[uid] > 0) store.usage[uid] -= 1;\n\nlet text;\nif (/quota/i.test(all)) {\n  const m = all.match(/try again in ([0-9:]+)/i);\n  text = `<b>😴 Free GPU time used up for today</b>\\n\\n` +\n    `The free video engine has run out of its daily GPU time.` +\n    (m ? ` It resets in about <b>${esc(m[1])}</b>.` : ' Please try again later.') +\n    `\\n\\nThis attempt was not counted against your daily limit.`;\n} else {\n  text = `<b>⚠️ Video generation failed</b>\\n\\n` +\n    (primary ? `<b>First try:</b> ${esc(primary).slice(0, 250)}\\n` : '') +\n    (last && last !== primary ? `<b>Retry:</b> ${esc(last).slice(0, 250)}\\n` : '') +\n    `\\nThe free GPU may be busy. Please try again in a few minutes.`;\n}\nreturn [{ json: { chat_id: job.chat_id, ack_message_id: job.ack_message_id, text } }];"
+      }
+    },
+    {
+      "id": "df994ab2-250d-4adc-89c9-b505bd61cd15",
+      "name": "Generation Error Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3000,
+        720
+      ],
+      "parameters": {
+        "operation": "editMessageText",
+        "messageType": "message",
+        "chatId": "={{ $json.chat_id }}",
+        "messageId": "={{ $json.ack_message_id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_ME",
+          "name": "Telegram Bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Parse Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Message": {
+      "main": [
+        [
+          {
+            "node": "Has Image?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Image?": {
+      "main": [
+        [
+          {
+            "node": "Check Daily Limit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Daily Limit": {
+      "main": [
+        [
+          {
+            "node": "Allowed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Allowed?": {
+      "main": [
+        [
+          {
+            "node": "Send Ack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Limit Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Ack": {
+      "main": [
+        [
+          {
+            "node": "Get Telegram File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Telegram File": {
+      "main": [
+        [
+          {
+            "node": "Build Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Job": {
+      "main": [
+        [
+          {
+            "node": "Execute Primary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Primary": {
+      "main": [
+        [
+          {
+            "node": "Normalize Output",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Route Primary Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Primary Error": {
+      "main": [
+        [
+          {
+            "node": "Try Fallback?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Try Fallback?": {
+      "main": [
+        [
+          {
+            "node": "Wait Before Retry",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Generation Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Before Retry": {
+      "main": [
+        [
+          {
+            "node": "Execute Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Fallback": {
+      "main": [
+        [
+          {
+            "node": "Normalize Output",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Generation Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Output": {
+      "main": [
+        [
+          {
+            "node": "Download Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Generation Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Video": {
+      "main": [
+        [
+          {
+            "node": "Send Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Delivery Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Video": {
+      "main": [
+        [
+          {
+            "node": "Edit Ack: Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Delivery Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Delivery Failure": {
+      "main": [
+        [
+          {
+            "node": "Delivery Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Generation Failure": {
+      "main": [
+        [
+          {
+            "node": "Generation Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

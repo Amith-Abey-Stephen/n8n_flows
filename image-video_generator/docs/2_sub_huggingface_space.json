@@ -1,0 +1,231 @@
+{
+  "name": "Video Provider – Hugging Face Space (Gradio)",
+  "nodes": [
+    {
+      "id": "26d33a13-522d-4cc3-8323-d4891e717499",
+      "name": "When Executed by Main Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "01ab6a70-bfbf-4464-ab1d-eae8274d76ac",
+      "name": "Prepare Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const j = $input.first().json;\nif (!j.image_base64) throw new Error('No image received from main workflow');\nif (!j.provider?.space_url) throw new Error('No provider settings received from main workflow');\nconst mime = j.mime_type ?? 'image/jpeg';\nconst ext = (mime.split('/')[1] ?? 'jpg').replace('jpeg', 'jpg');\nreturn [{\n  json: { prompt: j.prompt, provider: j.provider },\n  binary: { files: { data: j.image_base64, mimeType: mime, fileName: `input.${ext}` } },\n}];"
+      }
+    },
+    {
+      "id": "18544a45-8603-4d1d-9518-8d64da71a66b",
+      "name": "Upload Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.provider.space_url }}/gradio_api/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files",
+              "inputDataFieldName": "files"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Hugging Face Token"
+        }
+      }
+    },
+    {
+      "id": "050063b9-7262-41a1-b92b-680036dc9b58",
+      "name": "Build Call",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const prep = $('Prepare Upload').first().json;\nlet paths;\ntry { paths = JSON.parse($json.body); }\ncatch { throw new Error(`Image upload to the Space failed: ${String($json.body).slice(0, 200)}`); }\nconst path = Array.isArray(paths) ? paths[0] : null;\nif (!path) throw new Error('Image upload to the Space returned no file path');\n\nconst image = { path, meta: { _type: 'gradio.FileData' } };\nconst data = prep.provider.data.map((v) => v === '__IMAGE__' ? image : v === '__PROMPT__' ? prep.prompt : v);\nreturn [{ json: { body: { data }, provider: prep.provider } }];"
+      }
+    },
+    {
+      "id": "9bf5b26e-10b7-46b7-904d-4c8455801d5c",
+      "name": "Start Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.provider.space_url }}/gradio_api/call/{{ $json.provider.api_name }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Hugging Face Token"
+        }
+      }
+    },
+    {
+      "id": "a978ac75-f88f-4504-8559-53c20a55e3ab",
+      "name": "Wait For Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Build Call').first().json.provider.space_url }}/gradio_api/call/{{ $('Build Call').first().json.provider.api_name }}/{{ $json.event_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 600000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "Hugging Face Token"
+        }
+      }
+    },
+    {
+      "id": "6c67c19e-198c-4008-8f97-308ac8f49e74",
+      "name": "Parse Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// The Gradio result comes back as a server-sent-event stream: \"event: X\" / \"data: Y\" lines.\nconst prov = $('Build Call').first().json.provider;\nconst eventId = $('Start Job').first().json.event_id;\nconst raw = String($json.body ?? '');\n\nconst events = [];\nlet cur = null;\nfor (const line of raw.split(/\\r?\\n/)) {\n  if (line.startsWith('event:')) { cur = { event: line.slice(6).trim(), data: '' }; events.push(cur); }\n  else if (line.startsWith('data:') && cur) { cur.data += line.slice(5).trim(); }\n}\nconst last = events.filter((e) => e.event === 'complete' || e.event === 'error').pop();\nif (!last) throw new Error(`${prov.name}: no result from Space (${raw.slice(0, 150) || 'empty response'})`);\n\nif (last.event === 'error') {\n  let msg = last.data;\n  try { const p = JSON.parse(last.data); msg = p?.message ?? p; } catch {}\n  throw new Error(`${prov.name}: ${msg || 'the Space returned an error (it may be busy or out of GPU quota)'}`);\n}\n\nconst out = JSON.parse(last.data);\nconst first = Array.isArray(out) ? out[0] : out;\nconst file = first?.video ?? first;           // Gradio video output may be wrapped in { video, subtitles }\nlet url = file?.url ?? null;\nif (!url && file?.path) url = `${prov.space_url}/gradio_api/file=${file.path}`;\nif (!url) throw new Error(`${prov.name}: finished but returned no video`);\n\nreturn [{ json: { video_url: url, provider: prov.name, job_id: eventId } }];"
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Main Workflow": {
+      "main": [
+        [
+          {
+            "node": "Prepare Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Upload": {
+      "main": [
+        [
+          {
+            "node": "Upload Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Image": {
+      "main": [
+        [
+          {
+            "node": "Build Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Call": {
+      "main": [
+        [
+          {
+            "node": "Start Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Job": {
+      "main": [
+        [
+          {
+            "node": "Wait For Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait For Result": {
+      "main": [
+        [
+          {
+            "node": "Parse Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "pinData": {}
+}
