@@ -1,0 +1,82 @@
+{
+  "name": "SyncBatch – workflow alerts",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "ae6530e6-5372-4f93-af8c-183a2dc5656f",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Builds the Discord alert for any failed run of the content workflow.\nconst d = $input.first().json;\nconst ex = d.execution || {};\nconst lines = [\n  `🚨 **${d.workflow?.name || 'Workflow'} failed**`,\n  `Step: **${ex.lastNodeExecuted || 'unknown'}**`,\n  `Error: ${String(ex.error?.message || 'no message').slice(0, 800)}`,\n  ex.url ? `Execution: ${ex.url}` : '',\n  'The 18:00 catch-up run retries automatically if the morning run failed. If both fail, open the execution, fix the cause, and run the workflow manually.',\n].filter(Boolean);\nreturn [{ json: { discord: { username: 'SyncBatch alerts', content: lines.join('\\n').slice(0, 1990) } } }];\n"
+      },
+      "id": "c66a215d-a4a5-4e91-9223-7169ba0035d5",
+      "name": "Alert message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/webhooks/REPLACE_WITH_ALERTS_WEBHOOK",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.discord) }}"
+      },
+      "id": "eabdba26-33c3-42c2-a987-28055bbdb04d",
+      "name": "Send alert to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Alert message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert message": {
+      "main": [
+        [
+          {
+            "node": "Send alert to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata"
+  },
+  "pinData": {}
+}

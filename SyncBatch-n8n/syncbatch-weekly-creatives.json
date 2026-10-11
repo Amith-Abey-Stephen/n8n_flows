@@ -1,0 +1,632 @@
+{
+  "name": "SyncBatch – weekly creatives",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## SyncBatch weekly creatives (free models)\nRuns **Mon & Thu 09:00 IST** with an **18:00 catch-up**.\n\nWriters, tried in order (all free tiers):\n1. **Gemini 3.8 Flash**\n2. **Gemini 3.5 Flash-Lite** (separate quota)\n3. **Groq · GPT-OSS 120B** (different company)\n4. **Backup bank** of 10 fact-checked posts\n\nEach writer's 3 options are checked for repeats and unverifiable claims before use. The card (SyncBatch + INOVUS LABS logos) is rendered on the SyncBatch site; if that fails, captions go out text-only. Any crash → alerts workflow.\n\nEdit the **Config** node first.",
+        "width": 560,
+        "height": 360,
+        "color": 5
+      },
+      "id": "963c4d67-0977-415e-884c-614a4f609600",
+      "name": "About",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -220,
+        -460
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1,4"
+            }
+          ]
+        }
+      },
+      "id": "f62c90f2-b4bf-4b2e-a1c9-dc2d26b2a88d",
+      "name": "Mon & Thu 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 18 * * 1,4"
+            }
+          ]
+        }
+      },
+      "id": "a51f437e-0771-4e58-bcb3-9c6beb344a84",
+      "name": "Catch-up 18:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -200,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Edit these values once after importing ──────────────────────────────\nreturn [{\n  json: {\n    // Discord channel where finished posts arrive (Channel settings → Integrations → Webhooks)\n    discordWebhook: 'https://discord.com/api/webhooks/REPLACE_ME',\n    // Card renderer on the SyncBatch site (its secret lives in the \"SyncBatch card secret\" credential)\n    cardUrl: 'https://syncbatch.inovuslabs.org/api/social-card',\n    siteUrl: 'https://syncbatch.inovuslabs.org',\n    // Optional: @mention yourself on every post, e.g. '<@123456789012345678>' (leave '' for none)\n    mention: '',\n    // Free models, tried in this order. Each has its own free quota.\n    geminiPrimary: 'gemini-3.8-flash',\n    geminiBackup: 'gemini-3.5-flash-lite',\n    groqModel: 'openai/gpt-oss-120b',\n  },\n}];\n"
+      },
+      "id": "2870083e-5f10-4e3c-a7e8-5878ffcb3286",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decides WHAT this run posts, and whether it should run at all.\n// History lives in this workflow's static data (kept between production runs;\n// manual test runs don't save it).\nconst store = $getWorkflowStaticData('global');\nstore.history = store.history || [];\n\n// Date in IST, so the 09:00 and 18:00 runs share one slot.\nconst slotKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });\n\n// The 18:00 catch-up run does nothing if this morning's post already went out.\nif (store.history.some((h) => h.slotKey === slotKey && h.status)) {\n  return [];\n}\n\n// Topic rotation. Each pillar names the layouts that suit it.\nconst PILLARS = [\n  { id: 'teachers', audience: 'school and college teachers, class coordinators', angle: 'class or parent list → contacts → WhatsApp group', templates: ['statement', 'steps', 'beforeafter'] },\n  { id: 'tips', audience: 'anyone who saves many numbers', angle: 'one practical, true tip about contacts, country codes, WhatsApp visibility, labels, iPhone .vcf, or removing a batch later', templates: ['tip'] },\n  { id: 'events', audience: 'college fest, conference and event organisers', angle: 'registration or attendee list (Google Forms, ticketing CSV) → team phones', templates: ['beforeafter', 'statement'] },\n  { id: 'coaching', audience: 'coaching centres and tuition teachers', angle: 'new batches every month, labelled and removable later', templates: ['usecase', 'steps'] },\n  { id: 'maker', audience: 'students, makers, LinkedIn network', angle: 'build in public: why a KJCMT student built SyncBatch at INOVUS LABS IEDC, a decision or lesson from building it (no invented metrics)', templates: ['statement', 'usecase'] },\n  { id: 'sales', audience: 'small sales, real estate and recruitment teams', angle: 'lead or client list → caller ID, with a campaign label, removed after the campaign', templates: ['usecase', 'beforeafter'] },\n  { id: 'trust', audience: 'people wary of giving a website their contacts', angle: 'what happens to your data: personal syncs not stored, official Google People API, preview before anything syncs', templates: ['usecase', 'tip'] },\n  { id: 'howto', audience: 'first-time visitors', angle: 'the whole flow in three steps, Android and iPhone', templates: ['steps'] },\n];\n\nconst n = store.history.length;\nconst pillar = PILLARS[n % PILLARS.length];\n// Avoid repeating the last layout used.\nconst lastTemplate = store.history.at(-1)?.template;\nconst template = pillar.templates.find((t) => t !== lastTemplate) || pillar.templates[0];\n\nconst recent = store.history.slice(-40);\n\nreturn [{\n  json: {\n    slotKey,\n    pillar: pillar.id,\n    audience: pillar.audience,\n    angle: pillar.angle,\n    template,\n    recentHeadlines: recent.map((h) => `${h.headline} ${h.highlight || ''}`.trim()),\n    recentAngles: recent.map((h) => h.angleSummary).filter(Boolean),\n    usedFallbackIds: store.history.map((h) => h.fallbackId).filter(Boolean),\n  },\n}];\n"
+      },
+      "id": "47c524d7-31b5-47a2-938d-3868051f6a9b",
+      "name": "Plan post",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Builds one prompt and the request body for each free model. The fact sheet is the only source of product claims.\nconst plan = $input.first().json;\nconst cfg = $('Config').first().json;\n\nconst SYSTEM = `You write social posts for SyncBatch, a web app built by a student maker at INOVUS LABS IEDC (Kristu Jyoti College of Management and Technology, Changanassery, Kerala, India). The audience is mainly in India: teachers, coaching centres, event organisers, small sales teams.\n\nFACT SHEET — the only product claims you may make:\n- Upload an Excel (.xlsx, .xls) or CSV file, or paste a public Google Sheets link.\n- SyncBatch finds the name and phone columns, flags invalid numbers, and skips duplicate numbers in the file. You can edit or untick contacts in a preview before anything syncs.\n- Numbers without a country code get the default country you pick (India +91 preselected; US & Canada, UK, UAE, Saudi Arabia, Qatar, Kuwait, Oman, Bahrain, Singapore, Malaysia, Australia, Germany, France and others). Leading zeros are removed. Numbers that already start with + are kept.\n- Android: contacts go to the user's own Google Contacts through Google's official People API, in batches of 200. Numbers already in their Google Contacts are skipped.\n- iPhone: download one .vcf file; opening it on the iPhone (AirDrop, Files, Mail) lets iOS add all contacts at once. No app to install.\n- Add a label before or after every name, e.g. \"(Class 12-A)\" or \"[Lead Q4]\".\n- Remove a batch later: upload the same sheet in \"Delete contacts\" mode; contacts are matched by phone number.\n- WhatsApp shows people saved in the phone's contacts, so after syncing, people appear in WhatsApp (refresh contacts) and you can make a group.\n- Only the name and one phone number per row are saved.\n- Personal syncs are not stored by SyncBatch. Exception: the Institutional Hub, where an admin sends one list to members, keeps that list so members can accept it.\n- Pricing: first 10 contacts free, no card. Credit packs: ₹49 for 300 contacts, ₹109 for 750 contacts (US$3 / US$5 outside India). Credits never expire. No subscription. Payments via Razorpay (UPI, cards, net banking in India).\n\nNEVER: invent user counts, ratings, reviews, testimonials, quotes, results, percentages or time saved beyond \"minutes instead of an hour\"; claim GDPR/CCPA or any compliance; claim column mapping, emails or extra fields sync, unlimited anything, \"190+ countries\", or features not listed; offer discounts or deadlines; use fake urgency; mention competitors by name.\n\nVOICE: plain, warm, specific, sentence case. Short sentences. Talk about the reader's real situation (a class list, a fest registration sheet, a new batch). Banned words: seamless, effortless, ultimate, revolutionary, game-changer, unlock, supercharge, leverage, elevate, enterprise-grade, \"in today's world\". Emojis: at most 2 per caption, none on the card.\n\nCARD FIELDS (rendered on a 1080x1350 image; the card already shows both logos, the website and a button):\n- eyebrow: 1–4 words naming the audience or topic.\n- headline + highlight: read together as one sentence; highlight (the blue part) is the last 1–4 words. Together max 55 characters.\n- body: one or two sentences, max 150 characters.\n- points: for \"steps\" exactly 3 short steps (max 45 chars each); for \"usecase\" exactly 3 short benefits (max 45 chars); for \"tip\" exactly 1 sentence (max 120 chars) that states the tip; otherwise [].\n- before/after: only for \"beforeafter\" (max 80 chars each); otherwise \"\".\n- cta: 2–5 words, e.g. \"Try it free\", \"Preview your list free\".\n\nCAPTIONS:\n- instagram_caption: hook line, 2–4 short lines, ends with \"Link in bio.\" Max 700 characters. No URL.\n- linkedin_post: 4–8 short lines, first-person from Amith (the maker) when it fits, ends with the line \"{LINK}\" where the link goes. Max 1100 characters.\n- x_post: max 200 characters, ends with \"{LINK}\".\n- hashtags: instagram 8–12 (mix broad, niche and Kerala/India), linkedin 3–5, x 1–2. Without the # sign. Always include SyncBatch and InovusLabs in instagram and linkedin.\n- alt_text: describes the card image for screen readers, max 200 characters.\n- angle_summary: 8–15 words describing this post's idea, used to avoid repeats.`;\n\nconst user = `Write 3 different candidate posts for ${plan.slotKey}.\nTopic pillar: ${plan.pillar}\nAudience: ${plan.audience}\nAngle: ${plan.angle}\nCard layout (template): ${plan.template}\n\nEvery candidate must be clearly different from these recent headlines:\n${plan.recentHeadlines.length ? plan.recentHeadlines.map((h) => `- ${h}`).join('\\n') : '- (none yet)'}\n\nAnd take a different idea from these recent angles:\n${plan.recentAngles.length ? plan.recentAngles.map((a) => `- ${a}`).join('\\n') : '- (none yet)'}\n\nMake the 3 candidates different from each other too (different hook, different situation).`;\n\nconst str = { type: 'string' };\nconst strArr = { type: 'array', items: str };\nconst FIELDS = ['eyebrow', 'headline', 'highlight', 'body', 'points', 'before', 'after', 'cta', 'instagram_caption', 'linkedin_post', 'x_post', 'hashtags', 'alt_text', 'angle_summary'];\nconst candidate = {\n  type: 'object',\n  additionalProperties: false,\n  required: FIELDS,\n  properties: {\n    eyebrow: str, headline: str, highlight: str, body: str, points: strArr, before: str, after: str, cta: str,\n    instagram_caption: str, linkedin_post: str, x_post: str,\n    hashtags: {\n      type: 'object', additionalProperties: false, required: ['instagram', 'linkedin', 'x'],\n      properties: { instagram: strArr, linkedin: strArr, x: strArr },\n    },\n    alt_text: str, angle_summary: str,\n  },\n};\nconst schema = {\n  type: 'object', additionalProperties: false, required: ['candidates'],\n  properties: { candidates: { type: 'array', items: candidate } },\n};\n\n// Gemini's responseSchema uses an OpenAPI-style subset: upper-case types, no additionalProperties.\nconst toGemini = (s) => {\n  const out = { type: s.type.toUpperCase() };\n  if (s.properties) {\n    out.properties = Object.fromEntries(Object.entries(s.properties).map(([k, v]) => [k, toGemini(v)]));\n    out.required = s.required;\n    out.propertyOrdering = Object.keys(s.properties);\n  }\n  if (s.items) out.items = toGemini(s.items);\n  return out;\n};\n\nconst geminiBody = {\n  systemInstruction: { parts: [{ text: SYSTEM }] },\n  contents: [{ role: 'user', parts: [{ text: user }] }],\n  generationConfig: {\n    responseMimeType: 'application/json',\n    responseSchema: toGemini(schema),\n    maxOutputTokens: 16384,\n  },\n};\n\nconst groqBody = {\n  model: cfg.groqModel,\n  messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }],\n  response_format: { type: 'json_schema', json_schema: { name: 'social_posts', strict: true, schema } },\n  reasoning_effort: 'low',\n  max_completion_tokens: 6000,\n};\n\nreturn [{ json: { ...plan, geminiBody, groqBody } }];\n"
+      },
+      "id": "2d5de0b5-48b0-4cde-af02-cb05189e9d84",
+      "name": "Build prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://generativelanguage.googleapis.com/v1beta/models/' + $('Config').first().json.geminiPrimary + ':generateContent' }}",
+        "options": {
+          "timeout": 120000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Build prompt').first().json.geminiBody) }}"
+      },
+      "id": "42481770-cb67-4321-b8c0-e4972bc7afbb",
+      "name": "Gemini Flash",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        100
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reads one model's reply and picks the first candidate that isn't a repeat.\n// Throwing here passes the run to the next free model (error output).\nconst PROVIDER = 'Gemini Flash';\nconst SHAPE = 'gemini'; // 'gemini' or 'openai'\nconst res = $input.first().json;\nconst plan = $('Build prompt').first().json;\n\nlet text = '';\nif (SHAPE === 'gemini') {\n  const cand = (res.candidates || [])[0];\n  if (!cand) throw new Error(`${PROVIDER}: no answer (${res.promptFeedback?.blockReason || 'empty response'})`);\n  if (cand.finishReason && cand.finishReason !== 'STOP') throw new Error(`${PROVIDER}: stopped early (${cand.finishReason})`);\n  text = (cand.content?.parts || []).filter((p) => !p.thought && typeof p.text === 'string').map((p) => p.text).join('');\n} else {\n  const choice = (res.choices || [])[0];\n  if (!choice) throw new Error(`${PROVIDER}: no answer`);\n  if (choice.finish_reason && choice.finish_reason !== 'stop') throw new Error(`${PROVIDER}: stopped early (${choice.finish_reason})`);\n  text = choice.message?.content || '';\n}\nif (!text) throw new Error(`${PROVIDER}: returned no text`);\n\nlet candidates;\ntry {\n  candidates = JSON.parse(text.replace(/^\\s*```(?:json)?\\s*|\\s*```\\s*$/g, '')).candidates;\n} catch {\n  throw new Error(`${PROVIDER}: returned invalid JSON`);\n}\nif (!Array.isArray(candidates) || !candidates.length) throw new Error(`${PROVIDER}: returned no candidates`);\n\nconst words = (s) => new Set(String(s).toLowerCase().replace(/[^a-z0-9₹ ]/g, ' ').split(/\\s+/).filter((w) => w.length > 2));\nconst similarity = (a, b) => {\n  const A = words(a); const B = words(b);\n  if (!A.size || !B.size) return 0;\n  let common = 0;\n  for (const w of A) if (B.has(w)) common++;\n  return common / Math.min(A.size, B.size);\n};\n\nconst BANNED = /\\b(seamless|effortless|ultimate|revolutionary|game[- ]changer|unlock|supercharge|leverage|elevate|enterprise-grade|gdpr|ccpa|190\\+|unlimited|testimonial|rated|\\d+(,\\d{3})*\\+? (users|customers|teachers|happy))\\b/i;\n\nconst problems = [];\nconst valid = candidates.filter((c, i) => {\n  const headline = `${c.headline} ${c.highlight}`.trim();\n  const all = [headline, c.body, c.instagram_caption, c.linkedin_post, c.x_post, ...(c.points || []), c.before, c.after].join(' ');\n  const why = [];\n  if (!c.headline) why.push('no headline');\n  if (headline.length > 70) why.push('headline too long');\n  if (BANNED.test(all)) why.push(`banned claim \"${all.match(BANNED)[0]}\"`);\n  const closest = Math.max(0, ...plan.recentHeadlines.map((h) => similarity(headline, h)));\n  if (closest >= 0.6) why.push('too close to a recent headline');\n  const angleRepeat = Math.max(0, ...plan.recentAngles.map((a) => similarity(c.angle_summary, a)));\n  if (angleRepeat >= 0.7) why.push('repeats a recent angle');\n  if (plan.template === 'steps' && (c.points || []).length < 3) why.push('steps needs 3 points');\n  if (plan.template === 'beforeafter' && (!c.before || !c.after)) why.push('missing before/after');\n  if (why.length) problems.push(`#${i + 1}: ${why.join(', ')}`);\n  return !why.length;\n});\n\nif (!valid.length) throw new Error(`${PROVIDER}: no usable candidate (${problems.join('; ')})`);\n\nreturn [{\n  json: {\n    source: PROVIDER,\n    note: problems.length ? `Skipped ${problems.length} candidate(s): ${problems.join('; ')}` : '',\n    post: valid[0],\n  },\n}];\n"
+      },
+      "id": "5e882117-fca1-4220-a0a7-84c0f2da0549",
+      "name": "Check: Gemini Flash",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        920,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://generativelanguage.googleapis.com/v1beta/models/' + $('Config').first().json.geminiBackup + ':generateContent' }}",
+        "options": {
+          "timeout": 120000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Build prompt').first().json.geminiBody) }}"
+      },
+      "id": "f1e599bd-0551-4b6a-84c1-5a93985ebff0",
+      "name": "Gemini Flash-Lite",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1140,
+        260
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reads one model's reply and picks the first candidate that isn't a repeat.\n// Throwing here passes the run to the next free model (error output).\nconst PROVIDER = 'Gemini Flash-Lite';\nconst SHAPE = 'gemini'; // 'gemini' or 'openai'\nconst res = $input.first().json;\nconst plan = $('Build prompt').first().json;\n\nlet text = '';\nif (SHAPE === 'gemini') {\n  const cand = (res.candidates || [])[0];\n  if (!cand) throw new Error(`${PROVIDER}: no answer (${res.promptFeedback?.blockReason || 'empty response'})`);\n  if (cand.finishReason && cand.finishReason !== 'STOP') throw new Error(`${PROVIDER}: stopped early (${cand.finishReason})`);\n  text = (cand.content?.parts || []).filter((p) => !p.thought && typeof p.text === 'string').map((p) => p.text).join('');\n} else {\n  const choice = (res.choices || [])[0];\n  if (!choice) throw new Error(`${PROVIDER}: no answer`);\n  if (choice.finish_reason && choice.finish_reason !== 'stop') throw new Error(`${PROVIDER}: stopped early (${choice.finish_reason})`);\n  text = choice.message?.content || '';\n}\nif (!text) throw new Error(`${PROVIDER}: returned no text`);\n\nlet candidates;\ntry {\n  candidates = JSON.parse(text.replace(/^\\s*```(?:json)?\\s*|\\s*```\\s*$/g, '')).candidates;\n} catch {\n  throw new Error(`${PROVIDER}: returned invalid JSON`);\n}\nif (!Array.isArray(candidates) || !candidates.length) throw new Error(`${PROVIDER}: returned no candidates`);\n\nconst words = (s) => new Set(String(s).toLowerCase().replace(/[^a-z0-9₹ ]/g, ' ').split(/\\s+/).filter((w) => w.length > 2));\nconst similarity = (a, b) => {\n  const A = words(a); const B = words(b);\n  if (!A.size || !B.size) return 0;\n  let common = 0;\n  for (const w of A) if (B.has(w)) common++;\n  return common / Math.min(A.size, B.size);\n};\n\nconst BANNED = /\\b(seamless|effortless|ultimate|revolutionary|game[- ]changer|unlock|supercharge|leverage|elevate|enterprise-grade|gdpr|ccpa|190\\+|unlimited|testimonial|rated|\\d+(,\\d{3})*\\+? (users|customers|teachers|happy))\\b/i;\n\nconst problems = [];\nconst valid = candidates.filter((c, i) => {\n  const headline = `${c.headline} ${c.highlight}`.trim();\n  const all = [headline, c.body, c.instagram_caption, c.linkedin_post, c.x_post, ...(c.points || []), c.before, c.after].join(' ');\n  const why = [];\n  if (!c.headline) why.push('no headline');\n  if (headline.length > 70) why.push('headline too long');\n  if (BANNED.test(all)) why.push(`banned claim \"${all.match(BANNED)[0]}\"`);\n  const closest = Math.max(0, ...plan.recentHeadlines.map((h) => similarity(headline, h)));\n  if (closest >= 0.6) why.push('too close to a recent headline');\n  const angleRepeat = Math.max(0, ...plan.recentAngles.map((a) => similarity(c.angle_summary, a)));\n  if (angleRepeat >= 0.7) why.push('repeats a recent angle');\n  if (plan.template === 'steps' && (c.points || []).length < 3) why.push('steps needs 3 points');\n  if (plan.template === 'beforeafter' && (!c.before || !c.after)) why.push('missing before/after');\n  if (why.length) problems.push(`#${i + 1}: ${why.join(', ')}`);\n  return !why.length;\n});\n\nif (!valid.length) throw new Error(`${PROVIDER}: no usable candidate (${problems.join('; ')})`);\n\nreturn [{\n  json: {\n    source: PROVIDER,\n    note: problems.length ? `Skipped ${problems.length} candidate(s): ${problems.join('; ')}` : '',\n    post: valid[0],\n  },\n}];\n"
+      },
+      "id": "48e8020d-ffb6-4e95-ac83-61f5ce3cb5a2",
+      "name": "Check: Gemini Flash-Lite",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        160
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "options": {
+          "timeout": 120000
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Build prompt').first().json.groqBody) }}"
+      },
+      "id": "3cacb56a-5541-4804-af70-35df174bc4ca",
+      "name": "Groq GPT-OSS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1580,
+        420
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reads one model's reply and picks the first candidate that isn't a repeat.\n// Throwing here passes the run to the next free model (error output).\nconst PROVIDER = 'Groq GPT-OSS';\nconst SHAPE = 'openai'; // 'gemini' or 'openai'\nconst res = $input.first().json;\nconst plan = $('Build prompt').first().json;\n\nlet text = '';\nif (SHAPE === 'gemini') {\n  const cand = (res.candidates || [])[0];\n  if (!cand) throw new Error(`${PROVIDER}: no answer (${res.promptFeedback?.blockReason || 'empty response'})`);\n  if (cand.finishReason && cand.finishReason !== 'STOP') throw new Error(`${PROVIDER}: stopped early (${cand.finishReason})`);\n  text = (cand.content?.parts || []).filter((p) => !p.thought && typeof p.text === 'string').map((p) => p.text).join('');\n} else {\n  const choice = (res.choices || [])[0];\n  if (!choice) throw new Error(`${PROVIDER}: no answer`);\n  if (choice.finish_reason && choice.finish_reason !== 'stop') throw new Error(`${PROVIDER}: stopped early (${choice.finish_reason})`);\n  text = choice.message?.content || '';\n}\nif (!text) throw new Error(`${PROVIDER}: returned no text`);\n\nlet candidates;\ntry {\n  candidates = JSON.parse(text.replace(/^\\s*```(?:json)?\\s*|\\s*```\\s*$/g, '')).candidates;\n} catch {\n  throw new Error(`${PROVIDER}: returned invalid JSON`);\n}\nif (!Array.isArray(candidates) || !candidates.length) throw new Error(`${PROVIDER}: returned no candidates`);\n\nconst words = (s) => new Set(String(s).toLowerCase().replace(/[^a-z0-9₹ ]/g, ' ').split(/\\s+/).filter((w) => w.length > 2));\nconst similarity = (a, b) => {\n  const A = words(a); const B = words(b);\n  if (!A.size || !B.size) return 0;\n  let common = 0;\n  for (const w of A) if (B.has(w)) common++;\n  return common / Math.min(A.size, B.size);\n};\n\nconst BANNED = /\\b(seamless|effortless|ultimate|revolutionary|game[- ]changer|unlock|supercharge|leverage|elevate|enterprise-grade|gdpr|ccpa|190\\+|unlimited|testimonial|rated|\\d+(,\\d{3})*\\+? (users|customers|teachers|happy))\\b/i;\n\nconst problems = [];\nconst valid = candidates.filter((c, i) => {\n  const headline = `${c.headline} ${c.highlight}`.trim();\n  const all = [headline, c.body, c.instagram_caption, c.linkedin_post, c.x_post, ...(c.points || []), c.before, c.after].join(' ');\n  const why = [];\n  if (!c.headline) why.push('no headline');\n  if (headline.length > 70) why.push('headline too long');\n  if (BANNED.test(all)) why.push(`banned claim \"${all.match(BANNED)[0]}\"`);\n  const closest = Math.max(0, ...plan.recentHeadlines.map((h) => similarity(headline, h)));\n  if (closest >= 0.6) why.push('too close to a recent headline');\n  const angleRepeat = Math.max(0, ...plan.recentAngles.map((a) => similarity(c.angle_summary, a)));\n  if (angleRepeat >= 0.7) why.push('repeats a recent angle');\n  if (plan.template === 'steps' && (c.points || []).length < 3) why.push('steps needs 3 points');\n  if (plan.template === 'beforeafter' && (!c.before || !c.after)) why.push('missing before/after');\n  if (why.length) problems.push(`#${i + 1}: ${why.join(', ')}`);\n  return !why.length;\n});\n\nif (!valid.length) throw new Error(`${PROVIDER}: no usable candidate (${problems.join('; ')})`);\n\nreturn [{\n  json: {\n    source: PROVIDER,\n    note: problems.length ? `Skipped ${problems.length} candidate(s): ${problems.join('; ')}` : '',\n    post: valid[0],\n  },\n}];\n"
+      },
+      "id": "619519f2-fb16-4dbb-a99d-cde8ae49d7ee",
+      "name": "Check: Groq GPT-OSS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1800,
+        320
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Backup copy bank: used when every free model fails or none of their posts pass the checks.\n// Every claim here is from the verified fact sheet. Each post is used once before the bank repeats.\nconst plan = $('Build prompt').first().json;\nconst err = $input.first().json.error;\nconst reason = (typeof err === 'string' ? err : err?.message) || 'unknown error';\n\nconst T = (o) => ({ points: [], before: '', after: '', cta: 'Try it free', ...o });\nconst BANK = [\n  T({ id: 'fb-class-list', template: 'statement', eyebrow: 'For teachers', headline: 'Your class list, saved to your phone', highlight: 'in one go.', body: 'Upload the Excel sheet, check every number, and every student lands in your contacts.',\n    instagram_caption: 'New class, 60 numbers to save. 😩\\nUpload the Excel sheet to SyncBatch instead: check every number, then save them all to your phone at once.\\nAndroid and iPhone. First 10 contacts free.\\nLink in bio.',\n    linkedin_post: 'Every new semester, I watched teachers type 60+ numbers into their phones one by one, just to make a class WhatsApp group.\\n\\nSo I built SyncBatch at INOVUS LABS: upload the class sheet, check every number in a preview, and save them all at once.\\n\\nAndroid and iPhone. First 10 contacts free.\\n{LINK}',\n    x_post: 'Class list in Excel? Save every number to your phone at once, then make the WhatsApp group. {LINK}',\n    hashtags: { instagram: ['SyncBatch', 'InovusLabs', 'teachers', 'teacherlife', 'kerala', 'whatsapptips', 'productivity', 'edtech', 'studentstartup', 'excel'], linkedin: ['SyncBatch', 'InovusLabs', 'EdTech', 'BuildInPublic'], x: ['EdTech'] },\n    alt_text: 'SyncBatch card: Your class list, saved to your phone in one go, with a list of contacts marked 58 contacts added.', angle_summary: 'teacher saves a whole class list to phone at once' }),\n  T({ id: 'fb-whatsapp-tip', template: 'tip', eyebrow: 'Quick tip', headline: 'Numbers not showing in', highlight: 'WhatsApp?', body: 'WhatsApp only shows people saved in your phone, with the right country code.', points: ['SyncBatch adds +91 (or the country you pick) to every number, so they show up in WhatsApp.'],\n    instagram_caption: 'Saved a number but it is not in WhatsApp? 🤔\\nWhatsApp only shows contacts saved in your phone with the right country code.\\nSyncBatch adds +91 (or your country) to every number in your sheet before saving.\\nLink in bio.',\n    linkedin_post: 'A small thing that breaks WhatsApp groups: numbers saved without a country code.\\n\\nSyncBatch adds +91 (or the country you pick) to every number in your spreadsheet before saving it to your phone, and removes leading zeros.\\n{LINK}',\n    x_post: 'Numbers missing in WhatsApp? Check the country code. SyncBatch adds it to a whole sheet at once. {LINK}',\n    hashtags: { instagram: ['SyncBatch', 'InovusLabs', 'whatsapptips', 'techtips', 'androidtips', 'iphonetips', 'kerala', 'productivity'], linkedin: ['SyncBatch', 'InovusLabs', 'Productivity'], x: ['WhatsApp'] },\n    alt_text: 'SyncBatch tip card: Numbers not showing in WhatsApp? SyncBatch adds the country code to every number.', angle_summary: 'country code tip so numbers appear in WhatsApp' }),\n  T({ id: 'fb-fest', template: 'beforeafter', eyebrow: 'Event organisers', headline: 'Registration list to phone', highlight: 'before doors open.', body: 'Your whole team can call or WhatsApp any attendee.', before: 'Copying 120 numbers from a Google Form, one by one', after: 'One upload. Every attendee saved, duplicates skipped',\n    instagram_caption: 'Fest registrations closed? 🎉\\nExport the Google Form sheet, upload it to SyncBatch, and every attendee is saved on your phone. Duplicates skipped.\\nLink in bio.',\n    linkedin_post: 'Organising a fest or event? The registration sheet is usually a Google Form export with 100+ numbers.\\n\\nSyncBatch saves the whole sheet to your phone at once, skips duplicates, and lets you label everyone, e.g. \"(Fest 2026)\", so the list is easy to find and remove later.\\n{LINK}',\n    x_post: 'Event registration sheet → every attendee in your phone, duplicates skipped. {LINK}',\n    hashtags: { instagram: ['SyncBatch', 'InovusLabs', 'eventplanning', 'collegefest', 'eventmanagement', 'kerala', 'googleforms', 'productivity'], linkedin: ['SyncBatch', 'InovusLabs', 'Events', 'Productivity'], x: ['Events'] },\n    alt_text: 'SyncBatch card comparing copying 120 numbers one by one with one upload that saves every attendee.', angle_summary: 'event registration sheet saved to organiser phones before the event' }),\n  T({ id: 'fb-steps', template: 'steps', eyebrow: 'How it works', headline: 'Excel to WhatsApp group', highlight: 'in 3 steps.', body: 'No typing, no app to install.', points: ['Upload your Excel or CSV', 'Check every number in the preview', 'Sync to Android or get a .vcf'],\n    instagram_caption: 'Excel → phone → WhatsApp group, in 3 steps:\\n1. Upload the sheet\\n2. Check the preview\\n3. Sync to Android, or download a .vcf for iPhone\\nLink in bio.',\n    linkedin_post: 'How SyncBatch works, in three steps:\\n\\n1. Upload an Excel or CSV file (or a public Google Sheets link)\\n2. Check every contact in a preview: invalid numbers flagged, duplicates skipped\\n3. Sync to Google Contacts on Android, or download one .vcf file for iPhone\\n{LINK}',\n    x_post: 'Excel → preview → phone contacts. Android or iPhone, no typing. {LINK}',\n    hashtags: { instagram: ['SyncBatch', 'InovusLabs', 'howto', 'excel', 'whatsapptips', 'productivity', 'android', 'iphone', 'kerala'], linkedin: ['SyncBatch', 'InovusLabs', 'Productivity'], x: ['Productivity'] },\n    alt_text: 'SyncBatch card: Excel to WhatsApp group in 3 steps: upload, check preview, sync.', angle_summary: 'three step overview of the whole flow' }),\n  T({ id: 'fb-coaching', template: 'usecase', eyebrow: 'Coaching centres', headline: 'New batch every month?', highlight: 'Save them all at once.', body: 'Label each batch so you can find it, and remove it when the course ends.', points: ['Label like (JEE Batch 3)', 'Duplicates skipped', 'Remove the batch later'],\n    instagram_caption: 'Running batches every month? 📚\\nUpload the batch sheet, add a label like (JEE Batch 3), and save everyone at once. Remove the whole batch when the course ends.\\nLink in bio.',\n    linkedin_post: 'Coaching centres save a new batch of student and parent numbers every few weeks.\\n\\nWith SyncBatch you upload the sheet, add a label like \"(JEE Batch 3)\" to every name, and save them all at once. When the batch ends, upload the same sheet in delete mode to remove them.\\n{LINK}',\n    x_post: 'New batch every month? Save them with a label, remove them when the course ends. {LINK}',\n    hashtags: { instagram: ['SyncBatch', 'InovusLabs', 'coachingcentre', 'tuition', 'teachers', 'kerala', 'education', 'productivity'], linkedin: ['SyncBatch', 'InovusLabs', 'Education'], x: ['Education'] },\n    alt_text: 'SyncBatch card for coaching centres: label each batch, skip duplicates, remove the batch later.', angle_summary: 'coaching batches labelled and removed after the course' }),\n  T({ id: 'fb-iphone', eyebrow: 'iPhone users', headline: 'One .vcf file for', highlight: 'the whole list.', body: 'Open it on your iPhone and iOS offers to add every contact at once.', points: ['No app to install: open the .vcf from AirDrop, Files or Mail.'],\n    template: 'tip',\n    instagram_caption: 'On iPhone? 🍏\\nSyncBatch turns your Excel sheet into one .vcf file. Open it from AirDrop, Files or Mail and iOS adds every contact at once.\\nLink in bio.',\n    linkedin_post: 'iPhone users asked how SyncBatch works without Google Contacts.\\n\\nIt builds one .vcf file from your spreadsheet. Open it on the iPhone (AirDrop, Files or Mail) and iOS offers to add every contact at once. No app needed.\\n{LINK}',\n    x_post: 'Excel sheet → one .vcf → every contact on your iPhone. No app needed. {LINK}',\n    hashtags: { instagram: ['SyncBatch', 'InovusLabs', 'iphonetips', 'ios', 'excel', 'productivity', 'techtips', 'kerala'], linkedin: ['SyncBatch', 'InovusLabs', 'iPhone'], x: ['iPhone'] },\n    alt_text: 'SyncBatch card: one .vcf file for the whole list, opened on iPhone to add every contact.', angle_summary: 'iPhone users import a whole list through one vcf file' }),\n  T({ id: 'fb-maker', eyebrow: 'Built at INOVUS LABS', headline: 'Why a student built', highlight: 'SyncBatch.', body: 'Teachers were typing 60+ numbers by hand every semester. That felt fixable.', points: ['Made at INOVUS LABS IEDC', 'Android and iPhone', 'First 10 contacts free'],\n    template: 'usecase',\n    instagram_caption: 'A small problem I kept seeing at college: teachers typing 60+ numbers by hand, every semester.\\nSo I built SyncBatch at INOVUS LABS IEDC. 🛠️\\nLink in bio.',\n    linkedin_post: \"I'm building SyncBatch at INOVUS LABS IEDC, Kristu Jyoti College.\\n\\nIt started with a small, repeated problem: teachers saving whole class lists by hand, one number at a time.\\n\\nNow you upload the sheet, check the preview, and save every contact at once.\\n{LINK}\",\n    x_post: 'Built at INOVUS LABS: a tool that saves a whole Excel contact list to your phone at once. {LINK}',\n    hashtags: { instagram: ['SyncBatch', 'InovusLabs', 'studentstartup', 'buildinpublic', 'kerala', 'kjcmt', 'iedc', 'makers'], linkedin: ['SyncBatch', 'InovusLabs', 'BuildInPublic', 'StudentStartup'], x: ['BuildInPublic'] },\n    alt_text: 'SyncBatch card: Why a student built SyncBatch, made at INOVUS LABS IEDC.', angle_summary: 'maker story of why SyncBatch was built' }),\n  T({ id: 'fb-trust', eyebrow: 'Your data', headline: 'Your contacts', highlight: \"aren't stored.\", body: 'Personal syncs go from your file to your own Google account through the official People API.', points: ['Preview before anything syncs', 'Official Google People API', 'Personal syncs not stored'],\n    template: 'usecase',\n    instagram_caption: 'Worried about giving a website your contacts? Fair. 🔒\\nPersonal syncs go from your file to your own Google account through Google\\'s official People API. SyncBatch doesn\\'t keep them.\\nLink in bio.',\n    linkedin_post: 'A fair question about any contacts tool: where does my data go?\\n\\nFor personal syncs, SyncBatch reads your file, shows you a preview, and sends the contacts to your own Google account through Google\\'s official People API. They are not stored.\\n{LINK}',\n    x_post: 'Personal syncs go straight to your own Google account and aren\\'t stored. Preview first. {LINK}',\n    hashtags: { instagram: ['SyncBatch', 'InovusLabs', 'privacy', 'dataprivacy', 'productivity', 'android', 'kerala', 'techtips'], linkedin: ['SyncBatch', 'InovusLabs', 'Privacy'], x: ['Privacy'] },\n    alt_text: 'SyncBatch card: Your contacts are not stored; personal syncs go to your own Google account.', angle_summary: 'privacy: personal syncs are not stored' }),\n  T({ id: 'fb-sales', eyebrow: 'Sales teams', headline: 'Know who is calling', highlight: 'back.', body: 'Save the lead list with a campaign label, then remove it when the campaign ends.', points: ['Label like [Lead Q4]', 'Duplicates skipped', 'Remove the list later'],\n    template: 'usecase',\n    instagram_caption: 'Missed call from an unknown number? It might be a lead. 📞\\nSave your lead sheet with a label like [Lead Q4] so callbacks show who they are.\\nLink in bio.',\n    linkedin_post: 'Small sales teams lose callbacks to \"unknown number\".\\n\\nUpload the lead sheet to SyncBatch with a label like \"[Lead Q4]\", and callbacks show up with a name. When the campaign ends, remove the whole list by uploading the same sheet in delete mode.\\n{LINK}',\n    x_post: 'Lead sheet → phone contacts with a [Lead Q4] label, so callbacks show a name. {LINK}',\n    hashtags: { instagram: ['SyncBatch', 'InovusLabs', 'sales', 'realestate', 'smallbusiness', 'leads', 'kerala', 'productivity'], linkedin: ['SyncBatch', 'InovusLabs', 'Sales'], x: ['Sales'] },\n    alt_text: 'SyncBatch card for sales teams: label leads, skip duplicates, remove the list later.', angle_summary: 'sales leads labelled so callbacks show a name' }),\n  T({ id: 'fb-remove', eyebrow: 'Quick tip', headline: 'Done with a list?', highlight: 'Remove it in one go.', body: 'Upload the same sheet in Delete contacts mode. Contacts are matched by phone number.', points: ['Upload the same sheet in Delete contacts mode to remove the whole batch from your phone.'],\n    template: 'tip',\n    instagram_caption: 'Course over? Event done? 🧹\\nUpload the same sheet in Delete contacts mode and SyncBatch removes that whole batch from your phone, matched by number.\\nLink in bio.',\n    linkedin_post: 'Saving a big list is half the job. Removing it later is the other half.\\n\\nIn SyncBatch, upload the same sheet in \"Delete contacts\" mode and that batch is removed from your Google Contacts, matched by phone number.\\n{LINK}',\n    x_post: 'Done with a list? Upload the same sheet in delete mode and the whole batch is gone. {LINK}',\n    hashtags: { instagram: ['SyncBatch', 'InovusLabs', 'techtips', 'androidtips', 'productivity', 'declutter', 'kerala', 'teachers'], linkedin: ['SyncBatch', 'InovusLabs', 'Productivity'], x: ['Productivity'] },\n    alt_text: 'SyncBatch tip card: Done with a list? Remove it in one go by uploading the same sheet in delete mode.', angle_summary: 'removing a whole batch of contacts later' }),\n];\n\n// Unused posts first; prefer the planned layout. When all are used, start over.\nconst unused = BANK.filter((p) => !plan.usedFallbackIds.includes(p.id));\nconst pool = unused.length ? unused : BANK;\nconst pick = pool.find((p) => p.template === plan.template) || pool[0];\n\nreturn [{\n  json: {\n    source: 'backup',\n    note: `Backup post used because every free model failed. Last error: ${reason}`.slice(0, 400),\n    template: pick.template,\n    fallbackId: pick.id,\n    post: pick,\n  },\n}];\n"
+      },
+      "id": "3c844190-0d10-4532-bab1-6526e947168b",
+      "name": "Backup copy",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One shape for every path (any free model, or the backup bank): card request, captions with tracked links,\n// and the Discord message.\nconst plan = $('Build prompt').first().json;\nconst cfg = $('Config').first().json;\nconst { source, note, post, fallbackId } = $input.first().json;\nconst template = $input.first().json.template || plan.template;\nconst footer = [\n  source !== 'Gemini Flash' && source !== 'backup' ? `Gemini Flash was unavailable, so ${source} wrote this.` : '',\n  note || '',\n  `Written by ${source === 'backup' ? 'the backup bank' : source} · ${plan.slotKey}`,\n].filter(Boolean).join(' ');\n\nconst campaign = `weekly_${plan.slotKey}`;\nconst link = (src) => `${cfg.siteUrl}/?utm_source=${src}&utm_medium=social&utm_campaign=${campaign}`;\n\nconst tags = (list, must, max) => {\n  const clean = [...must, ...(list || [])]\n    .map((t) => String(t).replace(/[^\\p{L}\\p{N}_]/gu, ''))\n    .filter(Boolean);\n  return [...new Map(clean.map((t) => [t.toLowerCase(), t])).values()].slice(0, max).map((t) => `#${t}`).join(' ');\n};\n\nconst ig = `${post.instagram_caption.replace(/\\{LINK\\}/g, '').trim()}\\n\\n${tags(post.hashtags?.instagram, ['SyncBatch', 'InovusLabs'], 12)}`;\nconst li = `${post.linkedin_post.replace(/\\{LINK\\}/g, link('linkedin')).trim()}\\n\\n${tags(post.hashtags?.linkedin, ['SyncBatch', 'InovusLabs'], 5)}`;\n// X counts every link as 23 characters; keep the whole post under 280.\nlet xTags = tags(post.hashtags?.x, [], 2);\nconst xBase = post.x_post.includes('{LINK}') ? post.x_post : `${post.x_post} {LINK}`;\nconst xLen = (t) => xBase.replace('{LINK}', '').length + 23 + (t ? t.length + 1 : 0);\nwhile (xTags && xLen(xTags) > 280) xTags = xTags.split(' ').slice(0, -1).join(' ');\nconst x = `${xBase.replace('{LINK}', link('x'))}${xTags ? ` ${xTags}` : ''}`;\n\nconst card = {\n  template,\n  eyebrow: post.eyebrow, headline: post.headline, highlight: post.highlight, body: post.body,\n  points: post.points || [], before: post.before || '', after: post.after || '', cta: post.cta,\n};\n\nconst day = new Date(`${plan.slotKey}T00:00:00+05:30`).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' });\nconst cut = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);\n\nconst discord = {\n  username: 'SyncBatch content',\n  content: cut(`${cfg.mention ? `${cfg.mention} ` : ''}**New post ready — ${day}** · ${plan.pillar} · ${template}${source === 'backup' ? ' · ⚠️ backup copy' : ''}\\nInstagram bio link: ${link('instagram')}`, 1900),\n  embeds: [\n    { title: 'Instagram caption', description: cut(ig, 4000), color: 0x2e5bff, image: { url: 'attachment://card.png' } },\n    { title: 'LinkedIn post', description: cut(li, 4000), color: 0x0a66c2 },\n    { title: 'X post', description: cut(x, 1000), color: 0x0f172a },\n    { title: 'Alt text', description: cut(post.alt_text || '', 500) || '—', color: 0x64748b, footer: { text: cut(footer, 2000) } },\n  ],\n  allowed_mentions: { parse: ['users'] },\n};\n\nreturn [{\n  json: {\n    slotKey: plan.slotKey, pillar: plan.pillar, template, source, fallbackId: fallbackId || null,\n    headline: post.headline, highlight: post.highlight, angleSummary: post.angle_summary,\n    card, discord,\n  },\n}];\n"
+      },
+      "id": "e810c4f8-c8e3-4a0a-8597-690448a53d34",
+      "name": "Finalize post",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2260,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.cardUrl }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.card) }}"
+      },
+      "id": "b4d4f6b2-755c-4fe0-bc8c-a7f8a4d54617",
+      "name": "Render card",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2480,
+        100
+      ],
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Discord shows the image inside the embed only if the attachment name matches \"attachment://card.png\".\nconst item = $input.first();\nitem.binary.data.fileName = 'card.png';\nitem.binary.data.mimeType = 'image/png';\nreturn [item];\n"
+      },
+      "id": "d7e026c3-9b0a-4e31-804a-173111e7f9da",
+      "name": "Name image",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2700,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.discordWebhook }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files[0]",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "payload_json",
+              "value": "={{ JSON.stringify($('Finalize post').first().json.discord) }}"
+            }
+          ]
+        }
+      },
+      "id": "391b3f22-b98c-4f98-82dc-02c8fd78ae10",
+      "name": "Send card to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2920,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Card rendering failed even after retries: still deliver the captions, without an image.\nconst f = $('Finalize post').first().json;\nconst err = $input.first().json.error;\nconst reason = (typeof err === 'string' ? err : err?.message) || 'unknown error';\nconst discord = JSON.parse(JSON.stringify(f.discord));\ndelete discord.embeds[0].image;\ndiscord.content = `${discord.content}\\n⚠️ **The card image couldn't be rendered** (${reason.slice(0, 200)}). Captions are below; use one of the Product Hunt gallery images, or re-run the workflow.`.slice(0, 2000);\nreturn [{ json: { discord } }];\n"
+      },
+      "id": "e4b29e7d-4962-4d04-ba99-b6245c4f518a",
+      "name": "Captions only",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2700,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').first().json.discordWebhook }}",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.discord) }}"
+      },
+      "id": "9439ed87-ea9d-4f18-b6fc-aa164119ad86",
+      "name": "Send text to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2920,
+        260
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Records the post so later runs avoid repeating it, and so the 18:00 catch-up run skips this slot.\nconst f = $('Finalize post').first().json;\nconst store = $getWorkflowStaticData('global');\nstore.history = store.history || [];\nconst status = $('Send card to Discord').isExecuted ? 'sent' : 'text_only';\nstore.history.push({\n  slotKey: f.slotKey, status, pillar: f.pillar, template: f.template, source: f.source,\n  fallbackId: f.fallbackId, headline: f.headline, highlight: f.highlight, angleSummary: f.angleSummary,\n  at: new Date().toISOString(),\n});\nstore.history = store.history.slice(-120);\nreturn [{ json: { saved: true, status, total: store.history.length } }];\n"
+      },
+      "id": "cddd112a-8fc4-4380-bff4-2dfa244c671f",
+      "name": "Remember post",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3140,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Mon & Thu 09:00": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Catch-up 18:00": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Plan post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan post": {
+      "main": [
+        [
+          {
+            "node": "Build prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build prompt": {
+      "main": [
+        [
+          {
+            "node": "Gemini Flash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Flash": {
+      "main": [
+        [
+          {
+            "node": "Check: Gemini Flash",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gemini Flash-Lite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check: Gemini Flash": {
+      "main": [
+        [
+          {
+            "node": "Finalize post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Gemini Flash-Lite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Flash-Lite": {
+      "main": [
+        [
+          {
+            "node": "Check: Gemini Flash-Lite",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Groq GPT-OSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check: Gemini Flash-Lite": {
+      "main": [
+        [
+          {
+            "node": "Finalize post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Groq GPT-OSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq GPT-OSS": {
+      "main": [
+        [
+          {
+            "node": "Check: Groq GPT-OSS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Backup copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check: Groq GPT-OSS": {
+      "main": [
+        [
+          {
+            "node": "Finalize post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Backup copy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Backup copy": {
+      "main": [
+        [
+          {
+            "node": "Finalize post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize post": {
+      "main": [
+        [
+          {
+            "node": "Render card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render card": {
+      "main": [
+        [
+          {
+            "node": "Name image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Captions only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Name image": {
+      "main": [
+        [
+          {
+            "node": "Send card to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send card to Discord": {
+      "main": [
+        [
+          {
+            "node": "Remember post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Captions only": {
+      "main": [
+        [
+          {
+            "node": "Send text to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send text to Discord": {
+      "main": [
+        [
+          {
+            "node": "Remember post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all"
+  },
+  "pinData": {}
+}
